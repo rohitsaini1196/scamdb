@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { SearchBar } from "@/components/shared/search-bar";
 import { createClient } from "@/lib/supabase/server";
 import { detectEntityType, normalizeEntity, formatPhone } from "@/lib/normalize";

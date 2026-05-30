@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { ReportForm } from "@/components/report/report-form";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";

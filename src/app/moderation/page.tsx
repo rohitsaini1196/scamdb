@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { ModerationQueue } from "@/components/moderation/moderation-queue";
 import type { Metadata } from "next";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "Moderation",
   robots: { index: false, follow: false },
