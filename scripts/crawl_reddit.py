@@ -47,6 +47,16 @@ TARGET_SUBREDDITS = [
     "scambait",             # scambaiters often post Indian numbers
 ]
 
+# Reddit search queries — finds Indian scam number posts across ALL subreddits
+# Use old.reddit.com/search for unauthenticated access
+SEARCH_QUERIES = [
+    "india scam number +91",
+    "indian scammer phone number",
+    "upi fraud india number",
+    "india cyber fraud phone",
+    "scam call india 9",
+]
+
 # ── Regex ──────────────────────────────────────────────────────────────────────
 
 PHONE_RE = re.compile(r'(?:\+91[\-\s]?|91[\-\s]?|0)?([6-9]\d{9})\b')
@@ -264,6 +274,40 @@ def store_signal(db: Client, signal: dict) -> bool:
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
+async def search_reddit(crawler: AsyncWebCrawler, query: str) -> list[dict]:
+    """Search Reddit across all subreddits for posts with Indian scam numbers."""
+    import urllib.parse
+    url = f"https://old.reddit.com/search?q={urllib.parse.quote(query)}&sort=new&t=year&type=link"
+
+    try:
+        result = await crawler.arun(
+            url=url,
+            config=CrawlerRunConfig(
+                cache_mode=CacheMode.BYPASS,
+                page_timeout=20000,
+                delay_before_return_html=1.5,
+            )
+        )
+        html = result.html or ""
+    except Exception:
+        return []
+
+    links  = POST_LINK_RE.findall(html)
+    titles = TITLE_RE.findall(html)
+
+    posts = []
+    seen: set[str] = set()
+    for i, link in enumerate(links):
+        if link in seen:
+            continue
+        seen.add(link)
+        canon = link.replace("old.reddit.com", "www.reddit.com")
+        title = titles[i] if i < len(titles) else ""
+        posts.append({"url": canon, "old_url": link, "title": title.strip()})
+
+    return posts[:25]  # max 25 per query
+
+
 async def main():
     print(f"ScamDB Reddit Deep Crawler — {'DRY RUN' if DRY_RUN else 'LIVE'}")
     print(f"Sort: {SORT}/{TIME} | Limit: {POST_LIMIT}/subreddit\n")
@@ -273,52 +317,72 @@ async def main():
     total_inserted = 0
     total_skipped  = 0
 
+    all_posts: list[dict] = []
+    seen_post_urls: set[str] = set()
+
     async with AsyncWebCrawler(verbose=False) as crawler:
+        # Phase 1: subreddit listings
         for subreddit in TARGET_SUBREDDITS:
             print(f"[r/{subreddit}]")
-
             posts = await get_post_urls(crawler, subreddit)
+            for p in posts:
+                if p["url"] not in seen_post_urls:
+                    seen_post_urls.add(p["url"])
+                    all_posts.append(p)
+            await asyncio.sleep(1)
 
-            if not posts:
+        # Phase 2: Reddit-wide search for Indian scam numbers
+        print("[Reddit Search — cross-subreddit]")
+        for query in SEARCH_QUERIES:
+            print(f"  Searching: {query!r}")
+            posts = await search_reddit(crawler, query)
+            new_count = 0
+            for p in posts:
+                if p["url"] not in seen_post_urls:
+                    seen_post_urls.add(p["url"])
+                    all_posts.append(p)
+                    new_count += 1
+            print(f"  → {new_count} new posts")
+            await asyncio.sleep(1)
+
+        print(f"\nTotal unique posts to crawl: {len(all_posts)}\n")
+
+        # Phase 3: deep crawl each post
+        with_entities = 0
+        for i, post in enumerate(all_posts, 1):
+            print(f"  [{i}/{len(all_posts)}] {post['title'][:55]}", end=" ... ", flush=True)
+
+            signal = await crawl_post(crawler, post)
+
+            if not signal:
+                print("no entities")
                 continue
 
-            with_entities = 0
+            phones_str = ", ".join(signal["phones"]) if signal["phones"] else ""
+            upis_str   = ", ".join(signal["upis"]) if signal["upis"] else ""
+            found = []
+            if phones_str: found.append(f"📞 {phones_str}")
+            if upis_str:   found.append(f"💳 {upis_str}")
+            print(" | ".join(found))
+            with_entities += 1
 
-            for i, post in enumerate(posts, 1):
-                print(f"  [{i}/{len(posts)}] {post['title'][:60]}", end=" ... ", flush=True)
+            if DRY_RUN:
+                continue
 
-                signal = await crawl_post(crawler, post)
+            if already_stored(db, signal["source_url"]):
+                total_skipped += 1
+                continue
 
-                if not signal:
-                    print("no entities")
-                    continue
+            if store_signal(db, signal):
+                total_inserted += 1
 
-                phones_str = ", ".join(signal["phones"]) if signal["phones"] else ""
-                upis_str   = ", ".join(signal["upis"]) if signal["upis"] else ""
-                found = []
-                if phones_str: found.append(f"📞 {phones_str}")
-                if upis_str:   found.append(f"💳 {upis_str}")
-                print(" | ".join(found))
-                with_entities += 1
+            await asyncio.sleep(0.4)
 
-                if DRY_RUN:
-                    continue
-
-                if already_stored(db, signal["source_url"]):
-                    total_skipped += 1
-                    continue
-
-                if store_signal(db, signal):
-                    total_inserted += 1
-
-                await asyncio.sleep(0.5)  # polite delay
-
-            print(f"  → {with_entities}/{len(posts)} posts had phone/UPI entities\n")
-            await asyncio.sleep(2)
+        print(f"\n→ {with_entities}/{len(all_posts)} posts had phone/UPI entities")
 
     if not DRY_RUN:
         print(f"Total: {total_inserted} stored, {total_skipped} duplicate")
-        print("Trigger /api/cron/process to extract entities and queue for moderation.")
+        print("Trigger /api/cron/process to extract entities.")
 
 if __name__ == "__main__":
     asyncio.run(main())
