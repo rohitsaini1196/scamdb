@@ -145,11 +145,14 @@ async function fetchSubredditPosts(subreddit: string, limit: number): Promise<Re
       const title = entry.match(/<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/)?.[1]?.trim() ?? "";
       const link  = entry.match(/<link[^>]+href="([^"]+)"/)?.[1] ?? "";
       const content = entry.match(/<content[^>]*>([\s\S]*?)<\/content>/)?.[1]
-        ?.replace(/<[^>]+>/g, " ")
+        ?.replace(/<!--[\s\S]*?-->/g, "")          // strip HTML comments
+        ?.replace(/<[^>]+>/g, " ")                  // strip HTML tags
         ?.replace(/&amp;/g, "&")
         ?.replace(/&lt;/g, "<")
         ?.replace(/&gt;/g, ">")
         ?.replace(/&quot;/g, '"')
+        ?.replace(/&#x200B;/g, "")                  // zero-width space
+        ?.replace(/\s{2,}/g, " ")
         ?.trim() ?? "";
       const author = entry.match(/<name>(.*?)<\/name>/)?.[1] ?? "unknown";
       const dateStr = entry.match(/<updated>(.*?)<\/updated>/)?.[1] ?? "";
@@ -180,24 +183,46 @@ const ENTITY_HINT_RE = /[6-9]\d{5}|@(?:ybl|paytm|okicici|oksbi|okaxis|phonepe|gp
 
 async function fetchPostComments(permalink: string): Promise<RedditComment[]> {
   const token = await getRedditToken();
-  const base = token ? "oauth.reddit.com" : "www.reddit.com";
-  const url = `https://${base}${permalink}.json?limit=20&depth=1`;
-  const headers: Record<string, string> = {
-    "User-Agent": "ScamDB-India-Bot/1.0 (fraud awareness database; scamdb.in)",
-  };
-  if (token) headers["Authorization"] = `bearer ${token}`;
 
-  try {
-    const res = await fetch(url, { headers });
-    if (!res.ok) return [];
-    const data = await res.json() as [unknown, { data: { children: { data: RedditComment; kind: string }[] } }];
-    return data[1].data.children
-      .filter((c) => c.kind === "t1" && c.data.body && c.data.body !== "[deleted]")
-      .map((c) => c.data)
-      .slice(0, 20);
-  } catch {
-    return [];
+  // OAuth path
+  if (token) {
+    const url = `https://oauth.reddit.com${permalink}.json?limit=20&depth=1`;
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "ScamDB-India-Bot/1.0 (fraud awareness database; scamdb.in)",
+          Authorization: `bearer ${token}`,
+        },
+      });
+      if (!res.ok) return [];
+      const data = await res.json() as [unknown, { data: { children: { data: RedditComment; kind: string }[] } }];
+      return data[1].data.children
+        .filter((c) => c.kind === "t1" && c.data.body && c.data.body !== "[deleted]")
+        .map((c) => c.data)
+        .slice(0, 20);
+    } catch { return []; }
   }
+
+  // RSS fallback for comments — parse comment RSS feed
+  try {
+    const rssUrl = `https://www.reddit.com${permalink}.rss`;
+    const res = await fetch(rssUrl, {
+      headers: { "User-Agent": "ScamDB-India-Bot/1.0 (fraud awareness database; scamdb.in)" },
+    });
+    if (!res.ok) return [];
+    const xml = await res.text();
+    const entries = xml.match(/<entry>([\s\S]*?)<\/entry>/g) ?? [];
+
+    return entries.slice(1).map((entry) => { // slice(1) skips the post itself
+      const body = entry.match(/<content[^>]*>([\s\S]*?)<\/content>/)?.[1]
+        ?.replace(/<!--[\s\S]*?-->/g, "")
+        ?.replace(/<[^>]+>/g, " ")
+        ?.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+        ?.replace(/\s{2,}/g, " ").trim() ?? "";
+      const author = entry.match(/<name>(.*?)<\/name>/)?.[1] ?? "unknown";
+      return { body, author, score: 0, permalink };
+    }).filter((c) => c.body.length > 10);
+  } catch { return []; }
 }
 
 async function alreadyStored(sourceUrl: string): Promise<boolean> {

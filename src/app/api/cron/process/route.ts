@@ -93,7 +93,13 @@ export async function GET(req: NextRequest) {
   let skipped = 0;
 
   for (const signal of signals) {
-    const text = `${signal.title ?? ""}\n${signal.content}`;
+    const rawText = `${signal.title ?? ""}\n${signal.content}`;
+    // Strip HTML that may come from RSS content field
+    const text = rawText
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+      .replace(/\s{2,}/g, " ").trim();
 
     if (scoreText(text) < 2) {
       await service.from("raw_signals").update({ status: "skipped", processed_at: new Date().toISOString(), error: "low_score" }).eq("id", signal.id);
