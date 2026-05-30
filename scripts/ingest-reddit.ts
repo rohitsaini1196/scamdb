@@ -108,26 +108,68 @@ async function getRedditToken(): Promise<string | null> {
 
 async function fetchSubredditPosts(subreddit: string, limit: number): Promise<RedditPost[]> {
   const token = await getRedditToken();
-  const baseUrl = token
-    ? `https://oauth.reddit.com/r/${subreddit}/${SORT}.json?limit=${limit}&t=${TIME}`
-    : `https://www.reddit.com/r/${subreddit}/${SORT}.json?limit=${limit}&t=${TIME}`;
 
-  const headers: Record<string, string> = {
-    "User-Agent": "ScamDB-India-Bot/1.0 (fraud awareness database; scamdb.in)",
-  };
-  if (token) headers["Authorization"] = `bearer ${token}`;
-
-  try {
-    const res = await fetch(baseUrl, { headers });
-    if (!res.ok) {
-      console.warn(`  ⚠ r/${subreddit}: HTTP ${res.status}`);
-      return [];
+  // OAuth path — most reliable
+  if (token) {
+    const url = `https://oauth.reddit.com/r/${subreddit}/${SORT}.json?limit=${limit}&t=${TIME}`;
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "ScamDB-India-Bot/1.0 (fraud awareness database; scamdb.in)",
+          Authorization: `bearer ${token}`,
+        },
+      });
+      if (!res.ok) { console.warn(`  ⚠ r/${subreddit}: HTTP ${res.status}`); return []; }
+      const data = await res.json() as { data: { children: { data: RedditPost }[] } };
+      return data.data.children.map((c) => c.data);
+    } catch (err) {
+      console.warn(`  ⚠ r/${subreddit}: ${err}`); return [];
     }
-    const data = await res.json() as { data: { children: { data: RedditPost }[] } };
-    return data.data.children.map((c) => c.data);
+  }
+
+  // RSS fallback — no auth needed, Reddit hasn't blocked this yet
+  // Only supports "new" sort; limit ignored (RSS returns 25 fixed)
+  try {
+    const rssUrl = `https://www.reddit.com/r/${subreddit}/new.rss`;
+    const res = await fetch(rssUrl, {
+      headers: { "User-Agent": "ScamDB-India-Bot/1.0 (fraud awareness database; scamdb.in)" },
+    });
+    if (!res.ok) { console.warn(`  ⚠ r/${subreddit}: RSS HTTP ${res.status}`); return []; }
+
+    const xml = await res.text();
+    const posts: RedditPost[] = [];
+
+    // Parse RSS <entry> blocks
+    const entries = xml.match(/<entry>([\s\S]*?)<\/entry>/g) ?? [];
+    for (const entry of entries) {
+      const title = entry.match(/<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/)?.[1]?.trim() ?? "";
+      const link  = entry.match(/<link[^>]+href="([^"]+)"/)?.[1] ?? "";
+      const content = entry.match(/<content[^>]*>([\s\S]*?)<\/content>/)?.[1]
+        ?.replace(/<[^>]+>/g, " ")
+        ?.replace(/&amp;/g, "&")
+        ?.replace(/&lt;/g, "<")
+        ?.replace(/&gt;/g, ">")
+        ?.replace(/&quot;/g, '"')
+        ?.trim() ?? "";
+      const author = entry.match(/<name>(.*?)<\/name>/)?.[1] ?? "unknown";
+      const dateStr = entry.match(/<updated>(.*?)<\/updated>/)?.[1] ?? "";
+      const permalink = link.replace("https://www.reddit.com", "");
+
+      if (!title && !content) continue;
+      posts.push({
+        id: permalink,
+        title,
+        selftext: content.slice(0, 2000),
+        url: link,
+        permalink,
+        created_utc: dateStr ? Math.floor(new Date(dateStr).getTime() / 1000) : Date.now() / 1000,
+        score: 0,
+        author,
+      });
+    }
+    return posts;
   } catch (err) {
-    console.warn(`  ⚠ r/${subreddit}: ${err}`);
-    return [];
+    console.warn(`  ⚠ r/${subreddit}: RSS error ${err}`); return [];
   }
 }
 
