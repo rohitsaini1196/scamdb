@@ -120,9 +120,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            python scripts/crawl_reddit.py --dry-run --sort=new --time=week --limit=25
+            python scripts/crawl_reddit.py --dry-run --sort=top --time=all --limit=100
           else
-            python scripts/crawl_reddit.py --sort=new --time=week --limit=25
+            python scripts/crawl_reddit.py --sort=top --time=all --limit=100
           fi
 
       - name: Trigger signal processor
@@ -132,6 +132,49 @@ jobs:
         run: |
           sleep 10
           curl -sL -o /dev/null -w "Process signals: %{http_code}\n" \
+            "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
+
+  crawl-news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements-crawler.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-crawler.txt
+          crawl4ai-setup
+
+      - name: Install Playwright browsers
+        run: playwright install chromium --with-deps
+
+      - name: Crawl Indian news sources
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python scripts/crawl_news.py --dry-run --limit=20
+          else
+            python scripts/crawl_news.py --limit=30
+          fi
+
+      - name: Trigger signal processor
+        if: github.event.inputs.dry_run != 'true'
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          sleep 10
+          curl -sL -o /dev/null -w "Process news signals: %{http_code}\n" \
             "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
 
   crawl-advisories:

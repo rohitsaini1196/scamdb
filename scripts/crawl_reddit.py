@@ -40,10 +40,11 @@ SORT        = sort_arg.split("=")[1] if sort_arg else "new"   # new | hot | top
 TIME        = time_arg.split("=")[1] if time_arg else "week"  # day | week | month | year | all
 
 # Subreddits to deep-crawl (full page + comments)
-# Keep this list short — each post = one browser request
 TARGET_SUBREDDITS = [
-    "indianscammers",
-    "IndianScamBusters",
+    "indianscammers",       # primary — Indian scam numbers
+    "IndianScamBusters",    # secondary
+    "Scams",                # large (2M+), filter for Indian posts
+    "scambait",             # scambaiters often post Indian numbers
 ]
 
 # ── Regex ──────────────────────────────────────────────────────────────────────
@@ -97,36 +98,95 @@ def get_markdown(result) -> str:
     md = result.markdown
     return (md.raw_markdown if hasattr(md, "raw_markdown") else str(md)) or ""
 
-# ── Fetch post listing via RSS (no auth needed) ────────────────────────────────
+# ── Fetch post listing via old.reddit.com — paginated ─────────────────────────
 
-async def get_post_urls(subreddit: str) -> list[dict]:
-    """Fetch post listing via RSS and return list of {url, title, permalink}."""
-    rss_url = f"https://www.reddit.com/r/{subreddit}/{SORT}.rss?limit={POST_LIMIT}&t={TIME}"
+# Link pattern for old.reddit post links in listing pages
+POST_LINK_RE = re.compile(
+    r'href="(https://old\.reddit\.com/r/[^/]+/comments/[^"]+)"',
+    re.IGNORECASE
+)
+TITLE_RE = re.compile(r'<a[^>]+class="[^"]*title[^"]*"[^>]*>([^<]+)</a>')
+AFTER_RE  = re.compile(r'<span[^>]*>\[<a[^>]+href="[^?]+\?(?:[^"]*&)?after=([^&"]+)[^"]*"[^>]*>next</a>\]</span>')
+
+async def get_post_urls(crawler: AsyncWebCrawler, subreddit: str) -> list[dict]:
+    """
+    Paginate through old.reddit.com listing to collect up to POST_LIMIT posts.
+    Falls back to RSS if listing fetch fails.
+    """
+    posts: list[dict] = []
+    seen_urls: set[str] = set()
+    after: str | None = None
+    pages_fetched = 0
+    max_pages = max(1, POST_LIMIT // 25)  # 25 posts/page
+
+    while len(posts) < POST_LIMIT and pages_fetched < max_pages:
+        url = f"https://old.reddit.com/r/{subreddit}/{SORT}/?t={TIME}"
+        if after:
+            url += f"&after={after}"
+
+        try:
+            result = await crawler.arun(
+                url=url,
+                config=CrawlerRunConfig(
+                    cache_mode=CacheMode.BYPASS,
+                    page_timeout=20000,
+                    delay_before_return_html=1.0,
+                )
+            )
+            html = result.html or ""
+        except Exception as e:
+            print(f"  ✗ Listing page error: {e}")
+            break
+
+        if not html or "blocked" in html.lower()[:500]:
+            break
+
+        # Extract post links + titles from listing HTML
+        links  = POST_LINK_RE.findall(html)
+        titles = TITLE_RE.findall(html)
+
+        for i, link in enumerate(links):
+            if link in seen_urls or len(posts) >= POST_LIMIT:
+                continue
+            # Canonical reddit.com URL for storage dedup
+            canon = link.replace("old.reddit.com", "www.reddit.com")
+            title = titles[i] if i < len(titles) else ""
+            seen_urls.add(link)
+            posts.append({"url": canon, "old_url": link, "title": title.strip()})
+
+        # Check for next page
+        after_match = AFTER_RE.search(html)
+        after = after_match.group(1) if after_match else None
+        pages_fetched += 1
+
+        if not after:
+            break
+
+        await asyncio.sleep(1)
+
+    # Fallback to RSS if listing returned nothing (rate limited etc.)
+    if not posts:
+        posts = await _get_post_urls_rss(subreddit)
+
+    print(f"  {len(posts)} posts from listing ({pages_fetched} page(s))")
+    return posts
+
+async def _get_post_urls_rss(subreddit: str) -> list[dict]:
+    """RSS fallback — max 25 posts, no pagination."""
+    import urllib.request
+    rss_url = f"https://www.reddit.com/r/{subreddit}/{SORT}.rss?limit=25&t={TIME}"
     try:
-        import urllib.request
-        req = urllib.request.Request(
-            rss_url,
-            headers={"User-Agent": "ScamDB-India-Bot/1.0 (scamdb.in)"}
-        )
+        req = urllib.request.Request(rss_url, headers={"User-Agent": "ScamDB-India-Bot/1.0"})
         xml = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", errors="replace")
-    except Exception as e:
-        print(f"  ✗ RSS fetch failed: {e}")
+    except Exception:
         return []
-
     posts = []
-    entries = re.findall(r'<entry>([\s\S]*?)<\/entry>', xml)
-    for entry in entries:
-        title = re.search(r'<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>', entry)
+    for entry in re.findall(r'<entry>([\s\S]*?)</entry>', xml):
+        title = re.search(r'<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>', entry)
         link  = re.search(r'<link[^>]+href="([^"]+)"', entry)
-        if not title or not link:
-            continue
-        url = link.group(1)
-        # Only scam-relevant titles
-        if not is_scam_related(title.group(1)):
-            continue
-        posts.append({"url": url, "title": title.group(1).strip()})
-
-    return posts[:POST_LIMIT]
+        if title and link:
+            posts.append({"url": link.group(1), "old_url": link.group(1).replace("www.", "old."), "title": title.group(1).strip()})
+    return posts
 
 # ── Crawl individual post page (post + all comments) ──────────────────────────
 
@@ -136,8 +196,7 @@ async def crawl_post(crawler: AsyncWebCrawler, post: dict) -> dict | None:
     Returns signal dict or None if no entities found.
     """
     url = post["url"]
-    # Use old.reddit.com — cleaner HTML, less JS, easier to parse
-    old_url = url.replace("www.reddit.com", "old.reddit.com")
+    old_url = post.get("old_url") or url.replace("www.reddit.com", "old.reddit.com")
 
     try:
         result = await crawler.arun(
@@ -218,8 +277,7 @@ async def main():
         for subreddit in TARGET_SUBREDDITS:
             print(f"[r/{subreddit}]")
 
-            posts = await get_post_urls(subreddit)
-            print(f"  {len(posts)} scam-related posts from RSS")
+            posts = await get_post_urls(crawler, subreddit)
 
             if not posts:
                 continue
