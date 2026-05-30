@@ -55,7 +55,7 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           curl -s -o /dev/null -w "Process signals: %{http_code}\n" \
-            "https://scamdb.in/api/cron/process?secret=$CRON_SECRET"
+            "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
 
   ingest-reddit:
     runs-on: ubuntu-latest
@@ -89,7 +89,7 @@ jobs:
         run: |
           sleep 30
           curl -s -o /dev/null -w "Process signals: %{http_code}\n" \
-            "https://scamdb.in/api/cron/process?secret=$CRON_SECRET"
+            "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
 
   crawl-reddit-deep:
     runs-on: ubuntu-latest
@@ -120,9 +120,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            python scripts/crawl_reddit.py --dry-run --sort=top --time=week --limit=25
+            python scripts/crawl_reddit.py --dry-run --sort=new --time=week --limit=25
           else
-            python scripts/crawl_reddit.py --sort=top --time=week --limit=25
+            python scripts/crawl_reddit.py --sort=new --time=week --limit=25
           fi
 
       - name: Trigger signal processor
@@ -175,4 +175,4 @@ jobs:
         run: |
           sleep 30
           curl -s -o /dev/null -w "Process advisory signals: %{http_code}\n" \
-            "https://scamdb.in/api/cron/process?secret=$CRON_SECRET"
+            "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"

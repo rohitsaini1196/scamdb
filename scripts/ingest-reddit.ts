@@ -32,20 +32,11 @@ const supabase = createClient(
 );
 
 const SUBREDDITS = [
-  "indianscammers",       // goldmine — dedicated Indian scam reporting
-  "IndianScamBusters",    // complementary scam reporting
-  "india",
-  "LegalAdviceIndia",
-  "personalfinanceindia",
-  "IndiaInvestments",
-  "digitalpayments",
-  "bangalore",
-  "mumbai",
-  "delhi",
-  "Chennai",
-  "hyderabad",
-  "pune",
-  "kolkata",
+  "indianscammers",       // primary — dedicated Indian scam reporting, actual numbers in posts
+  "IndianScamBusters",    // secondary — complementary scam reporting
+  "india",                // large general sub, occasional high-signal scam posts
+  "LegalAdviceIndia",     // sometimes has fraud case details with numbers
+  "personalfinanceindia", // UPI/financial fraud reports
 ];
 
 const SCAM_KEYWORDS = [
