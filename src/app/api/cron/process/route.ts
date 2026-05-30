@@ -9,9 +9,10 @@ const PHONE_RE = /(?:\+91[\-\s]?|91[\-\s]?|0)?([6-9]\d{9})\b/g;
 const UPI_RE = /\b([a-zA-Z0-9._\-]{2,64}@(?:ybl|okhdfcbank|okicici|oksbi|okaxis|paytm|apl|ibl|upi|barodampay|hdfcbank|icici|sbi|kotak|pnb|boi|bob|airtel|jio|phonepe|gpay|amazon|slice|navi|fi|jupiter|razorpay|cashfree|freecharge|mobikwik))\b/gi;
 
 const SCAM_KEYWORDS = [
-  "scam","fraud","cheated","duped","fake","phishing","otp","upi fraud",
-  "loan scam","investment scam","job scam","lottery","impersonation",
-  "lost money","cybercrime","beware","warning",
+  "scam","scammer","scammers","fraud","fraudster","cheated","duped",
+  "fake","phishing","otp","upi fraud","loan scam","investment scam",
+  "job scam","lottery","impersonation","lost money","cybercrime",
+  "beware","warning","cyber crime","cheat",
 ];
 
 function scoreText(t: string) {
@@ -101,12 +102,18 @@ export async function GET(req: NextRequest) {
       .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
       .replace(/\s{2,}/g, " ").trim();
 
-    if (scoreText(text) < 2) {
-      await service.from("raw_signals").update({ status: "skipped", processed_at: new Date().toISOString(), error: "low_score" }).eq("id", signal.id);
+    const entities = extractEntities(text);
+    const score = scoreText(text);
+
+    // If entities found, require only 1 keyword (it's clearly scam-related).
+    // If no entities, require 2 keywords to avoid processing off-topic posts.
+    const minScore = entities.length > 0 ? 1 : 2;
+
+    if (score < minScore) {
+      await service.from("raw_signals").update({ status: "skipped", processed_at: new Date().toISOString(), error: `low_score:${score}` }).eq("id", signal.id);
       skipped++; continue;
     }
 
-    const entities = extractEntities(text);
     if (!entities.length) {
       await service.from("raw_signals").update({ status: "skipped", processed_at: new Date().toISOString(), error: "no_entities" }).eq("id", signal.id);
       skipped++; continue;
