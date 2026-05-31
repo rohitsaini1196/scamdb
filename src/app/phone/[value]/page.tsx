@@ -60,7 +60,7 @@ export default async function PhonePage({ params }: Props) {
   const { data: reports } = entity
     ? await supabase
         .from("reports")
-        .select("id, category, platform, description, amount_lost, evidence_urls, source_type, source_confidence, created_at")
+        .select("id, category, platform, description, amount_lost, evidence_urls, source_type, source_confidence, source_url, created_at")
         .eq("entity_id", entity.id)
         .eq("status", "approved")
         .order("created_at", { ascending: false })

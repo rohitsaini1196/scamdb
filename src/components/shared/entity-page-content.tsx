@@ -19,6 +19,7 @@ interface Report {
   evidence_urls: string[];
   source_type: string | null;
   source_confidence: string | null;
+  source_url: string | null;
   created_at: string;
 }
 
@@ -273,7 +274,11 @@ function ReportCard({ report }: { report: Report }) {
         )}
         {report.source_type && report.source_confidence && (
           <div className="mt-2">
-            <SourceBadge sourceType={report.source_type} sourceConfidence={report.source_confidence} />
+            <SourceBadge
+              sourceType={report.source_type}
+              sourceConfidence={report.source_confidence}
+              sourceUrl={report.source_url}
+            />
           </div>
         )}
       </CardContent>
