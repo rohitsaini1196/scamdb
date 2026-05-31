@@ -38,15 +38,18 @@ jobs:
       - name: Install Playwright browsers
         run: playwright install chromium --with-deps
 
-      - name: Run X crawler
+      - name: Run X / Twitter crawler (API v2)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
         run: |
+          # Twitter API v2 — official govt accounts (@CyberDost) + fraud search.
+          # No-ops gracefully if TWITTER_BEARER_TOKEN is unset.
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            python scripts/crawl_x.py --dry-run
+            python scripts/crawl_twitter.py --dry-run
           else
-            python scripts/crawl_x.py
+            python scripts/crawl_twitter.py
           fi
 
       - name: Trigger signal processor
@@ -54,7 +57,7 @@ jobs:
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl -s -o /dev/null -w "Process signals: %{http_code}\n" \
+          curl -sL -o /dev/null -w "Process signals: %{http_code}\n" \
             "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
 
   ingest-reddit:
@@ -132,6 +135,50 @@ jobs:
         run: |
           sleep 10
           curl -sL -o /dev/null -w "Process signals: %{http_code}\n" \
+            "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
+
+  # Screenshot OCR — highest-yield source. ~83% of scam-subreddit posts are
+  # screenshots; the number lives in the image, not the text. Reads scam-sub
+  # posts via Reddit OAuth (gets image URLs), OCRs each with Haiku/gpt-4o-mini.
+  # No-ops gracefully if REDDIT or vision creds are unset.
+  crawl-screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install supabase
+
+      - name: OCR scam screenshots
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python scripts/crawl_screenshots.py --dry-run --sort=top --time=year --limit=30
+          else
+            python scripts/crawl_screenshots.py --sort=top --time=year --limit=30
+          fi
+
+      - name: Trigger signal processor
+        if: github.event.inputs.dry_run != 'true'
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          sleep 10
+          curl -sL -o /dev/null -w "Process screenshot signals: %{http_code}\n" \
             "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
 
   # crawl-news removed from cron — 0% yield. News articles describe arrests
