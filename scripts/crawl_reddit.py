@@ -65,7 +65,10 @@ UPI_RE = re.compile(
     r'ybl|okhdfcbank|okicici|oksbi|okaxis|paytm|apl|ibl|upi|'
     r'barodampay|hdfcbank|icici|sbi|kotak|pnb|boi|bob|airtel|'
     r'jio|phonepe|gpay|amazon|slice|navi|fi|jupiter|razorpay|'
-    r'cashfree|freecharge|mobikwik))\b',
+    r'cashfree|freecharge|mobikwik|rapl|yapl|abfspay|axisb|axl|'
+    r'dlb|federal|fbl|idfcbank|idfcfirst|rbl|indus|kbl|tjsb|uco|'
+    r'unionbank|ubi|yesbank|yesg|citi|hsbc|sc|scb|dbs|equitas|'
+    r'jkb|karb|aubank|finobank|paytmqr|waaxis|wahdfcbank|waicici|wasbi))\b',
     re.IGNORECASE
 )
 

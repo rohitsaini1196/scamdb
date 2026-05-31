@@ -6,7 +6,7 @@ const SEED_USER_ID = "00000000-0000-0000-0000-000000000001";
 const BATCH_SIZE = 50;
 
 const PHONE_RE = /(?:\+91[\-\s]?|91[\-\s]?|0)?([6-9]\d{9})\b/g;
-const UPI_RE = /\b([a-zA-Z0-9._\-]{2,64}@(?:ybl|okhdfcbank|okicici|oksbi|okaxis|paytm|apl|ibl|upi|barodampay|hdfcbank|icici|sbi|kotak|pnb|boi|bob|airtel|jio|phonepe|gpay|amazon|slice|navi|fi|jupiter|razorpay|cashfree|freecharge|mobikwik))\b/gi;
+const UPI_RE = /\b([a-zA-Z0-9._\-]{2,64}@(?:ybl|okhdfcbank|okicici|oksbi|okaxis|paytm|apl|ibl|upi|barodampay|hdfcbank|icici|sbi|kotak|pnb|boi|bob|airtel|jio|phonepe|gpay|amazon|slice|navi|fi|jupiter|razorpay|cashfree|freecharge|mobikwik|rapl|yapl|abfspay|axisb|axl|dlb|federal|fbl|idfcbank|idfcfirst|rbl|indus|kbl|tjsb|uco|unionbank|ubi|yesbank|yesg|citi|hsbc|sc|scb|dbs|equitas|jkb|karb|aubank|finobank|paytmqr|waaxis|wahdfcbank|waicici|wasbi))\b/gi;
 
 const SCAM_KEYWORDS = [
   "scam","scammer","scammers","fraud","fraudster","cheated","duped",
@@ -103,20 +103,27 @@ export async function GET(req: NextRequest) {
       .replace(/\s{2,}/g, " ").trim();
 
     const entities = extractEntities(text);
-    const score = scoreText(text);
 
-    // If entities found, require only 1 keyword (it's clearly scam-related).
-    // If no entities, require 2 keywords to avoid processing off-topic posts.
-    const minScore = entities.length > 0 ? 1 : 2;
-
-    if (score < minScore) {
-      await service.from("raw_signals").update({ status: "skipped", processed_at: new Date().toISOString(), error: `low_score:${score}` }).eq("id", signal.id);
-      skipped++; continue;
-    }
-
+    // No phone/UPI = no report possible. Skip regardless of keywords.
     if (!entities.length) {
       await service.from("raw_signals").update({ status: "skipped", processed_at: new Date().toISOString(), error: "no_entities" }).eq("id", signal.id);
       skipped++; continue;
+    }
+
+    // Entities present. High-trust sources (govt twitter, police advisory) skip the
+    // keyword gate entirely — the source IS the signal. For general/social sources,
+    // require >=1 scam keyword to avoid legit business numbers slipping through.
+    // Moderation queue is the final human gate either way.
+    const trustedSource =
+      signal.source_type === "police_advisory" ||
+      (signal.source_type === "twitter" && (signal.author_score ?? 0) >= 50);
+
+    if (!trustedSource) {
+      const score = scoreText(text);
+      if (score < 1) {
+        await service.from("raw_signals").update({ status: "skipped", processed_at: new Date().toISOString(), error: `low_score:${score}` }).eq("id", signal.id);
+        skipped++; continue;
+      }
     }
 
     await service.from("raw_signals").update({ status: "processing" }).eq("id", signal.id);
