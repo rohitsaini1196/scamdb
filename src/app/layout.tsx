@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Schibsted_Grotesk } from "next/font/google";
 import "./globals.css";
 import { Navbar } from "@/components/shared/navbar";
 import { Footer } from "@/components/shared/footer";
 
-const inter = Inter({ subsets: ["latin"] });
+const schibsted = Schibsted_Grotesk({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-sans",
+});
 
 export const metadata: Metadata = {
   title: {
@@ -38,6 +42,10 @@ export const metadata: Metadata = {
     description: "Community-powered database of suspicious phone numbers and UPI IDs reported in India.",
     images: ["/logo.png"],
   },
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
   robots: {
     index: true,
     follow: true,
@@ -55,7 +63,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={`${inter.className} min-h-screen flex flex-col bg-background`}>
+      <body className={`${schibsted.variable} font-sans min-h-screen flex flex-col bg-white`}>
         <Navbar />
         <main className="flex-1">{children}</main>
         <Footer />

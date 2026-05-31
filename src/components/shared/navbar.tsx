@@ -1,8 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
@@ -11,7 +9,6 @@ import Image from "next/image";
 export function Navbar() {
   const [user, setUser] = useState<User | null>(null);
   const supabase = createClient();
-  const pathname = usePathname();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUser(data.user));
@@ -31,52 +28,84 @@ export function Navbar() {
     ?? "Account";
 
   return (
-    <nav className="border-b bg-white sticky top-0 z-50">
-      <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2 font-semibold text-gray-900">
-          <Image src="/logo.png" alt="ScamDB India" width={28} height={28} className="rounded-sm" />
-          ScamDB India
-        </Link>
-        <div className="flex items-center gap-3">
-          {user ? (
-            <>
+    <header
+      className="sticky top-0 z-40 border-b"
+      style={{ background: "rgba(255,255,255,.86)", backdropFilter: "saturate(1.4) blur(10px)", borderColor: "var(--line)" }}
+    >
+      <div className="max-w-[1080px] mx-auto px-6">
+        <div className="h-[66px] flex items-center justify-between">
+
+          {/* Brand */}
+          <Link href="/" className="flex items-center gap-1.5 hover:opacity-90 transition-opacity">
+            <Image src="/logo.png" alt="ScamDB" width={44} height={44} priority />
+            <span className="font-bold text-[22px] tracking-[-0.02em] leading-none" style={{ color: "var(--ink)" }}>
+              ScamDB
+            </span>
+          </Link>
+
+          {/* Nav actions */}
+          <div className="flex items-center gap-[18px]">
+            {user ? (
+              <>
+                <div className="flex items-center gap-2">
+                  {avatarUrl ? (
+                    <Image src={avatarUrl} alt={displayName} width={28} height={28} className="rounded-full" />
+                  ) : (
+                    <div
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold"
+                      style={{ background: "var(--navy-50)", color: "var(--navy)" }}
+                    >
+                      {displayName[0].toUpperCase()}
+                    </div>
+                  )}
+                  <span className="text-sm hidden sm:block max-w-[120px] truncate" style={{ color: "var(--ink-2)" }}>
+                    {displayName}
+                  </span>
+                  <button
+                    onClick={handleSignOut}
+                    className="text-sm transition-colors"
+                    style={{ color: "var(--ink-3)" }}
+                    onMouseOver={e => (e.currentTarget.style.color = "var(--ink)")}
+                    onMouseOut={e => (e.currentTarget.style.color = "var(--ink-3)")}
+                  >
+                    Sign out
+                  </button>
+                </div>
+                <Link href="/report">
+                  <button
+                    className="inline-flex items-center gap-1.5 h-[34px] px-[15px] rounded-full font-semibold text-[13px] border transition-colors"
+                    style={{ background: "var(--navy)", color: "#fff", borderColor: "transparent" }}
+                  >
+                    <FlagIcon />
+                    Report a number
+                  </button>
+                </Link>
+              </>
+            ) : (
               <Link href="/report">
-                <Button size="sm">Report</Button>
+                <button
+                  className="inline-flex items-center gap-1.5 h-[34px] px-[15px] rounded-full font-semibold text-[13px] border transition-colors"
+                  style={{ background: "var(--paper)", color: "var(--ink)", borderColor: "var(--line-strong)" }}
+                  onMouseOver={e => ((e.currentTarget as HTMLElement).style.background = "var(--surface)")}
+                  onMouseOut={e => ((e.currentTarget as HTMLElement).style.background = "var(--paper)")}
+                >
+                  <FlagIcon />
+                  Report a number
+                </button>
               </Link>
-              <div className="flex items-center gap-2">
-                {avatarUrl ? (
-                  <Image
-                    src={avatarUrl}
-                    alt={displayName}
-                    width={28}
-                    height={28}
-                    className="rounded-full"
-                  />
-                ) : (
-                  <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-xs font-medium text-gray-600">
-                    {displayName[0].toUpperCase()}
-                  </div>
-                )}
-                <span className="text-sm text-gray-600 hidden sm:block max-w-32 truncate">
-                  {displayName}
-                </span>
-                <Button size="sm" variant="ghost" onClick={handleSignOut} className="text-gray-500">
-                  Sign out
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <Link href={`/auth/login?redirect=${encodeURIComponent(pathname)}`}>
-                <Button size="sm" variant="ghost">Sign in</Button>
-              </Link>
-              <Link href="/report">
-                <Button size="sm">Report</Button>
-              </Link>
-            </>
-          )}
+            )}
+          </div>
+
         </div>
       </div>
-    </nav>
+    </header>
+  );
+}
+
+function FlagIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" width={15} height={15}>
+      <path d="M5 21V4m0 1h11l-2 4 2 4H5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }

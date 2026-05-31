@@ -1,4 +1,8 @@
-import type { SourceType, SourceConfidence } from "@/types/database";
+interface SourceBadgeProps {
+  sourceType:       string;
+  sourceConfidence: string;
+  sourceUrl?:       string | null;
+}
 
 const SOURCE_LABELS: Record<string, string> = {
   police_advisory: "Police Advisory",
@@ -7,62 +11,46 @@ const SOURCE_LABELS: Record<string, string> = {
   twitter:         "X / Twitter",
   facebook:        "Facebook",
   telegram:        "Telegram",
-  manual:          "Community Report",
-  other:           "Community Report",
+  manual:          "Community report",
+  other:           "Community report",
 };
 
-const SOURCE_ICONS: Record<string, string> = {
-  reddit:   "r/",
-  twitter:  "𝕏",
-  facebook: "f",
+const SOURCE_DOT: Record<string, string> = {
+  reddit:          "#ff4500",
+  twitter:         "#1d9bf0",
+  police_advisory: "var(--clear-line)",
+  news:            "var(--clear-line)",
 };
-
-const CONFIDENCE_COLORS: Record<string, string> = {
-  high:   "bg-blue-50 text-blue-700 border-blue-200",
-  medium: "bg-amber-50 text-amber-700 border-amber-200",
-  low:    "bg-gray-50 text-gray-500 border-gray-200",
-};
-
-const CONFIDENCE_DOT: Record<string, string> = {
-  high:   "bg-blue-500",
-  medium: "bg-amber-400",
-  low:    "bg-gray-400",
-};
-
-interface SourceBadgeProps {
-  sourceType:       string;
-  sourceConfidence: string;
-  sourceUrl?:       string | null;
-}
 
 export function SourceBadge({ sourceType, sourceConfidence, sourceUrl }: SourceBadgeProps) {
   if (sourceType === "manual" && sourceConfidence === "low") return null;
 
-  const label      = SOURCE_LABELS[sourceType] ?? "Community Report";
-  const colorClass = CONFIDENCE_COLORS[sourceConfidence] ?? CONFIDENCE_COLORS.low;
-  const dotClass   = CONFIDENCE_DOT[sourceConfidence] ?? CONFIDENCE_DOT.low;
-  const icon       = SOURCE_ICONS[sourceType];
+  const label = SOURCE_LABELS[sourceType] ?? "Community report";
+  const dotColor = SOURCE_DOT[sourceType] ?? "var(--ink-3)";
+  const isMod = sourceType === "police_advisory" || sourceType === "news";
 
   const badge = (
-    <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${colorClass}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />
-      {icon && <span className="font-mono text-[10px] opacity-60">{icon}</span>}
+    <span
+      className="inline-flex items-center gap-[6px] rounded-full font-medium text-[11.5px] border"
+      style={{
+        padding: "3px 9px 3px 7px",
+        color: "var(--ink-2)",
+        background: "var(--surface)",
+        borderColor: "var(--line)",
+      }}
+    >
+      <span
+        className="w-[6px] h-[6px] rounded-full flex-none"
+        style={{ background: isMod ? "var(--clear-line)" : dotColor }}
+      />
       {label}
-      {sourceUrl && (
-        <span className="opacity-50 text-[10px]">↗</span>
-      )}
+      {sourceUrl && <span style={{ opacity: 0.5, fontSize: 10 }}>↗</span>}
     </span>
   );
 
   if (sourceUrl) {
     return (
-      <a
-        href={sourceUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex hover:opacity-80 transition-opacity"
-        title={`View original post on ${label}`}
-      >
+      <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex hover:opacity-80 transition-opacity">
         {badge}
       </a>
     );

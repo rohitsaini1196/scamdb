@@ -124,8 +124,39 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color: #19212e;
+    background: #ffffff;
   }
   html {
     @apply font-sans;
   }
+  ::selection {
+    background: #dfe5ee;
+  }
+}
+
+/* ── ScamDB design tokens ──────────────────────────────────── */
+:root {
+  --navy:    #16243C;
+  --navy-800:#1B2C49;
+  --navy-100:#dfe5ee;
+  --navy-50: #eef1f7;
+  --spark:   #E8541E;
+
+  --paper:   #ffffff;
+  --canvas:  #f5f4f1;
+  --surface: #fbfaf8;
+  --ink:     #19212e;
+  --ink-2:   #586173;
+  --ink-3:   #8a91a0;
+  --line:    #e7e4dd;
+  --line-2:  #efece6;
+  --line-strong: #d8d4ca;
+
+  --clear-fg:#136a47; --clear-bg:#ebf3ee; --clear-line:#2f8a60; --clear-soft:#f4f9f5;
+  --low-fg:  #7a5c0c; --low-bg:  #faf2d6; --low-line:  #cca22a; --low-soft:  #fdf9e9;
+  --med-fg:  #9a4f16; --med-bg:  #f9e9d7; --med-line:  #db7f2c; --med-soft:  #fdf2e8;
+  --high-fg: #9c1d16; --high-bg: #f9e7e4; --high-line: #c5392b; --high-soft: #fdeeec;
 }
