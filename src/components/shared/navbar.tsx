@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -35,7 +34,7 @@ export function Navbar() {
     <nav className="border-b bg-white sticky top-0 z-50">
       <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2 font-semibold text-gray-900">
-          <Shield className="w-5 h-5 text-red-600" />
+          <Image src="/logo.png" alt="ScamDB India" width={28} height={28} className="rounded-sm" />
           ScamDB India
         </Link>
         <div className="flex items-center gap-3">

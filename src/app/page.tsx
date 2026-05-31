@@ -1,5 +1,6 @@
 import { SearchBar } from "@/components/shared/search-bar";
-import { Shield, Search, FileWarning } from "lucide-react";
+import { Search, FileWarning, Shield } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 export default function Home() {
@@ -7,8 +8,8 @@ export default function Home() {
     <div className="flex flex-col items-center">
       {/* Hero */}
       <section className="w-full bg-gradient-to-b from-red-50 to-white px-4 py-16 sm:py-24 flex flex-col items-center text-center">
-        <div className="flex items-center gap-2 mb-4">
-          <Shield className="w-8 h-8 text-red-600" />
+        <div className="flex items-center gap-3 mb-4">
+          <Image src="/logo.png" alt="ScamDB India" width={48} height={48} className="rounded-lg" />
           <span className="text-sm font-medium text-red-700 bg-red-100 px-3 py-1 rounded-full">
             Community-powered fraud awareness
           </span>

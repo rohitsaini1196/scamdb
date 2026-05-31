@@ -30,6 +30,13 @@ export const metadata: Metadata = {
     siteName: "ScamDB India",
     locale: "en_IN",
     type: "website",
+    images: [{ url: "/logo.png", width: 1024, height: 1024, alt: "ScamDB India" }],
+  },
+  twitter: {
+    card: "summary",
+    title: "ScamDB India",
+    description: "Community-powered database of suspicious phone numbers and UPI IDs reported in India.",
+    images: ["/logo.png"],
   },
   robots: {
     index: true,
