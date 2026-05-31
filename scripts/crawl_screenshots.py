@@ -7,9 +7,14 @@ phone number and UPI ID live in the image, not the post text. Text-only
 crawling skips ~83% of these posts as 'no_entities'.
 
 This crawler:
-  1. Lists scam-subreddit posts (old.reddit.com listing, JSON via .json)
+  1. Lists scam-subreddit posts. Two paths, auto-selected:
+       - Reddit OAuth JSON API when REDDIT_CLIENT_ID/SECRET are set (fast, gets
+         every gallery image from media_metadata/preview).
+       - RSS + crawl4ai fallback when no creds (RSS enumerates posts, crawl4ai
+         reads each post page's og:image). Needs no Reddit credentials.
   2. For each post, collects attached image URLs (i.redd.it, preview.redd.it, imgur)
-  3. Sends each image to Claude Haiku vision to extract phone numbers + UPI IDs
+  3. Sends each image to a vision model (Haiku / gpt-4o-mini) to extract
+     phone numbers + UPI IDs.
   4. Stores a raw_signal whose content embeds the extracted identifiers
      (so the existing /api/cron/process regex picks them up) and records the
      image URL in screenshot_urls for moderator review.
@@ -20,6 +25,7 @@ Usage:
   python scripts/crawl_screenshots.py --dry-run --limit=10
 """
 
+import asyncio
 import base64
 import json
 import os
@@ -31,6 +37,7 @@ import urllib.error
 import urllib.parse
 from datetime import datetime, timezone
 
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
 from supabase import create_client, Client
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -53,9 +60,7 @@ VISION_PROVIDER = "anthropic" if ANTHROPIC_KEY else ("openai" if OPENAI_KEY else
 if not VISION_PROVIDER:
     print("Skipping screenshot OCR — no ANTHROPIC_API_KEY / OPENAI_API_KEY set.")
     sys.exit(0)
-if not os.environ.get("REDDIT_CLIENT_ID"):
-    print("Skipping screenshot OCR — REDDIT_CLIENT_ID/SECRET required (Reddit 403s otherwise).")
-    sys.exit(0)
+# Reddit creds are OPTIONAL — without them the crawler uses the RSS + crawl4ai path.
 if not DRY_RUN and (not SUPABASE_URL or not SUPABASE_KEY):
     print("Error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required for live run.")
     sys.exit(1)
@@ -134,8 +139,15 @@ def fetch_json(url: str):
         print(f"  fetch error: {e}")
         return None
 
-def list_posts(subreddit: str) -> list[dict]:
-    """Return posts with their image URLs from a subreddit listing."""
+async def list_posts(crawler: AsyncWebCrawler, subreddit: str) -> list[dict]:
+    """Posts with image URLs. OAuth JSON path if creds present, else RSS+crawl4ai."""
+    if reddit_token():
+        return list_posts_oauth(subreddit)
+    return await list_posts_rss(crawler, subreddit)
+
+
+def list_posts_oauth(subreddit: str) -> list[dict]:
+    """OAuth path — JSON listing carries every image URL (gallery/preview)."""
     url = f"https://www.reddit.com/r/{subreddit}/{SORT}.json?limit={min(POST_LIMIT,100)}&t={TIME}"
     data = fetch_json(url)
     if not data:
@@ -156,6 +168,90 @@ def list_posts(subreddit: str) -> list[dict]:
             "images": images,
         })
     return posts[:POST_LIMIT]
+
+
+# RSS enumeration (no auth) + per-post og:image extraction via crawl4ai.
+RSS_ENTRY_RE  = re.compile(r'<entry>([\s\S]*?)</entry>')
+RSS_TITLE_RE  = re.compile(r'<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>', re.DOTALL)
+RSS_LINK_RE   = re.compile(r'<link[^>]+href="([^"]+)"')
+RSS_UPD_RE    = re.compile(r'<updated>(.*?)</updated>')
+OG_IMAGE_RE   = re.compile(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', re.IGNORECASE)
+OG_IMAGE_RE2  = re.compile(r'<meta[^>]+content="([^"]+)"[^>]+property="og:image"', re.IGNORECASE)
+# Reddit default / non-content og:images to ignore
+DEFAULT_IMG_RE = re.compile(r'(redditstatic|redditmedia\.com/.+/award|/avatar|snoo|default)', re.IGNORECASE)
+
+
+def fetch_rss(subreddit: str) -> str:
+    url = f"https://www.reddit.com/r/{subreddit}/{SORT}.rss?limit={min(POST_LIMIT,100)}&t={TIME}"
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        print(f"  RSS fetch error: {e}")
+        return ""
+
+
+async def post_image(crawler: AsyncWebCrawler, permalink: str) -> str | None:
+    """Read a post page's og:image; keep only real screenshot hosts."""
+    old_url = permalink.replace("www.reddit.com", "old.reddit.com").replace("https://reddit.com", "https://old.reddit.com")
+    try:
+        result = await crawler.arun(
+            url=old_url,
+            config=CrawlerRunConfig(cache_mode=CacheMode.BYPASS, page_timeout=20000, delay_before_return_html=0.8),
+        )
+        html = result.html or ""
+    except Exception:
+        return None
+    m = OG_IMAGE_RE.search(html) or OG_IMAGE_RE2.search(html)
+    if not m:
+        # Fallback: any direct redd.it image link in the page
+        alt = re.search(r'(https://(?:i|preview)\.redd\.it/[^\s"\'<>\\]+\.(?:jpg|jpeg|png|webp))', html, re.IGNORECASE)
+        if not alt:
+            return None
+        url = alt.group(1)
+    else:
+        url = m.group(1).replace("&amp;", "&")
+    if DEFAULT_IMG_RE.search(url):
+        return None
+    if not any(h in url for h in IMG_HOSTS):
+        return None
+    return url
+
+
+async def list_posts_rss(crawler: AsyncWebCrawler, subreddit: str) -> list[dict]:
+    xml = fetch_rss(subreddit)
+    if not xml:
+        return []
+
+    posts = []
+    for entry in RSS_ENTRY_RE.findall(xml)[:POST_LIMIT]:
+        title_m = RSS_TITLE_RE.search(entry)
+        link_m  = RSS_LINK_RE.search(entry)
+        if not title_m or not link_m:
+            continue
+        permalink = link_m.group(1)
+        upd_m = RSS_UPD_RE.search(entry)
+        created = 0
+        if upd_m:
+            try:
+                created = int(datetime.fromisoformat(upd_m.group(1).replace("Z", "+00:00")).timestamp())
+            except Exception:
+                created = 0
+
+        image = await post_image(crawler, permalink)
+        await asyncio.sleep(0.4)  # polite pacing between post-page fetches
+        if not image:
+            continue
+        posts.append({
+            "id": permalink.rstrip("/").split("/")[-1],
+            "title": title_m.group(1).strip(),
+            "selftext": "",
+            "permalink": permalink.replace("old.reddit.com", "www.reddit.com"),
+            "created_utc": created,
+            "images": [image],
+        })
+    return posts
 
 def collect_images(post_data: dict) -> list[str]:
     """Extract image URLs from a Reddit post's JSON (direct + gallery + preview)."""
@@ -321,43 +417,45 @@ def store_signal(db: Client, post: dict, ocr: dict, image_url: str) -> bool:
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
-def main():
+async def main():
     model = ANTHROPIC_MODEL if VISION_PROVIDER == "anthropic" else OPENAI_MODEL
+    auth = "OAuth" if reddit_token() else "RSS + crawl4ai"
     print(f"ScamDB Screenshot OCR Crawler — {'DRY RUN' if DRY_RUN else 'LIVE'}")
     print(f"Vision: {VISION_PROVIDER}/{model} | Sort: {SORT}/{TIME} | Limit: {POST_LIMIT}/sub")
-    print(f"Reddit auth: {'OAuth' if reddit_token() else 'NONE (will 403 — set REDDIT_CLIENT_ID/SECRET)'}\n")
+    print(f"Reddit access: {auth}\n")
 
     db = None if DRY_RUN else create_client(SUPABASE_URL, SUPABASE_KEY)
     total_inserted = total_skipped = images_ocrd = entities_found = 0
 
-    for sub in SUBREDDITS:
-        print(f"[r/{sub}]")
-        posts = list_posts(sub)
-        print(f"  {len(posts)} posts with images")
+    async with AsyncWebCrawler(verbose=False) as crawler:
+        for sub in SUBREDDITS:
+            print(f"[r/{sub}]")
+            posts = await list_posts(crawler, sub)
+            print(f"  {len(posts)} posts with images")
 
-        for i, post in enumerate(posts, 1):
-            if not DRY_RUN and already_stored(db, post["permalink"]):
-                total_skipped += 1
-                continue
-
-            for image_url in post["images"]:
-                ocr = ocr_image(image_url)
-                images_ocrd += 1
-                time.sleep(0.5)  # pace vision calls
-                if not ocr or not ocr["is_scam"]:
+            for i, post in enumerate(posts, 1):
+                if not DRY_RUN and already_stored(db, post["permalink"]):
+                    total_skipped += 1
                     continue
-                entities_found += 1
-                found = []
-                if ocr["phones"]: found.append("📞 " + ", ".join(ocr["phones"]))
-                if ocr["upis"]:   found.append("💳 " + ", ".join(ocr["upis"]))
-                print(f"  [{i}/{len(posts)}] {post['title'][:45]} → {' | '.join(found)}")
 
-                if DRY_RUN:
-                    break  # one image per post in dry-run preview
-                if store_signal(db, post, ocr, image_url):
-                    total_inserted += 1
-                break  # first image with entities is enough per post
-        print()
+                for image_url in post["images"]:
+                    ocr = ocr_image(image_url)
+                    images_ocrd += 1
+                    time.sleep(0.5)  # pace vision calls
+                    if not ocr or not ocr["is_scam"]:
+                        continue
+                    entities_found += 1
+                    found = []
+                    if ocr["phones"]: found.append("📞 " + ", ".join(ocr["phones"]))
+                    if ocr["upis"]:   found.append("💳 " + ", ".join(ocr["upis"]))
+                    print(f"  [{i}/{len(posts)}] {post['title'][:45]} → {' | '.join(found)}")
+
+                    if DRY_RUN:
+                        break  # one image per post in dry-run preview
+                    if store_signal(db, post, ocr, image_url):
+                        total_inserted += 1
+                    break  # first image with entities is enough per post
+            print()
 
     print(f"Images OCR'd: {images_ocrd} | with entities: {entities_found}")
     if not DRY_RUN:
@@ -365,4 +463,4 @@ def main():
         print("Trigger /api/cron/process to extract entities → moderation queue.")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
