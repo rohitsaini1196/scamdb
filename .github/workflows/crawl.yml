@@ -173,10 +173,11 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          # RSS path serves new/hot only; use new so the feed isn't empty.
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            python scripts/crawl_screenshots.py --dry-run --sort=top --time=year --limit=30
+            python scripts/crawl_screenshots.py --dry-run --sort=new --limit=40
           else
-            python scripts/crawl_screenshots.py --sort=top --time=year --limit=30
+            python scripts/crawl_screenshots.py --sort=new --limit=40
           fi
 
       - name: Trigger signal processor

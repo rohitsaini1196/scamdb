@@ -182,7 +182,9 @@ DEFAULT_IMG_RE = re.compile(r'(redditstatic|redditmedia\.com/.+/award|/avatar|sn
 
 
 def fetch_rss(subreddit: str) -> str:
-    url = f"https://www.reddit.com/r/{subreddit}/{SORT}.rss?limit={min(POST_LIMIT,100)}&t={TIME}"
+    # Reddit RSS only serves new/hot/rising — top.rss returns an empty feed.
+    rss_sort = SORT if SORT in ("new", "hot", "rising") else "new"
+    url = f"https://www.reddit.com/r/{subreddit}/{rss_sort}.rss?limit={min(POST_LIMIT,100)}"
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
