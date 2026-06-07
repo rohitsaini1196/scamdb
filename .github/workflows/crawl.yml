@@ -101,6 +101,47 @@ jobs:
           curl -sL -o /dev/null -w "Process signals: %{http_code}\n" \
             "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
 
+  # Web fraud-list aggregators (cyberdecode etc). Pure HTTP, no creds. Dedups
+  # per-number, so each run sweeps new numbers up to --max. Low-confidence source.
+  crawl-weblists:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install supabase
+
+      - name: Crawl web fraud lists
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python scripts/crawl_weblists.py --dry-run --max=40
+          else
+            python scripts/crawl_weblists.py --max=80
+          fi
+
+      - name: Trigger signal processor
+        if: github.event.inputs.dry_run != 'true'
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          sleep 10
+          for i in 1 2; do
+            curl -sL -o /dev/null -w "Process weblist signals: %{http_code}\n" \
+              "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
+            sleep 5
+          done
+
   # Screenshot OCR — highest-yield source. ~83% of scam-subreddit posts are
   # screenshots; the number lives in the image, not the text. Reads scam-sub
   # posts via Reddit OAuth (gets image URLs), OCRs each with Haiku/gpt-4o-mini.
