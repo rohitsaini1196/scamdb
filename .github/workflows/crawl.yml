@@ -215,11 +215,13 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          SINCE=$(date -u -d '21 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-21d +%Y-%m-%d)
+          # No --since: sweep the full archive. already_ocrd markers make each
+          # run pick up where the last left off (forward progress toward depth,
+          # where the high-yield 'list of scammers' posts live).
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            python scripts/crawl_archive.py --dry-run --max=40 --since=$SINCE
+            python scripts/crawl_archive.py --dry-run --max=40
           else
-            python scripts/crawl_archive.py --max=120 --since=$SINCE
+            python scripts/crawl_archive.py --max=120
           fi
 
       - name: Trigger signal processor

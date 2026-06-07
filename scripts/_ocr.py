@@ -46,6 +46,10 @@ UPI_RE = re.compile(
 )
 
 
+PLACEHOLDER_UPI_NAMES = {"upi", "name", "test", "example", "abc", "xxx", "xyz",
+                         "yourname", "username", "john", "scammer", "mobilenumber"}
+
+
 def normalize_phone(raw: str) -> str:
     d = re.sub(r'\D', '', raw)
     if d.startswith('91') and len(d) == 12: d = d[2:]
@@ -172,6 +176,8 @@ def ocr_image(url: str) -> dict | None:
     phones = [normalize_phone(p) for p in parsed.get("phones", [])]
     phones = [p for p in phones if len(p) == 10 and p[0] in "6789"]
     upis = [u.lower().strip() for u in parsed.get("upis", []) if UPI_RE.search(u or "")]
+    # Drop obvious placeholders the model echoes from the prompt / generic examples.
+    upis = [u for u in upis if u.split("@")[0] not in PLACEHOLDER_UPI_NAMES]
 
     if not phones and not upis:
         return None
