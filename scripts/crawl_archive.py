@@ -34,7 +34,7 @@ from supabase import create_client, Client
 
 from _ocr import (
     VISION_PROVIDER, ANTHROPIC_MODEL, OPENAI_MODEL, UA, IMG_HOSTS,
-    preview_to_fullres, ocr_image, already_stored, store_signal,
+    preview_to_fullres, ocr_image, already_ocrd, store_signal,
 )
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -48,7 +48,12 @@ sub_arg   = next((a for a in sys.argv if a.startswith("--sub=")), None)
 since_arg = next((a for a in sys.argv if a.startswith("--since=")), None)
 
 MAX_POSTS = int(max_arg.split("=")[1]) if max_arg else 800   # image-candidate posts per sub
-SUBREDDITS = [sub_arg.split("=")[1]] if sub_arg else ["indianscammers", "IndianScamBusters", "Scams", "scambait"]
+SUBREDDITS = [sub_arg.split("=")[1]] if sub_arg else [
+    "indianscammers",        # pure scam sub (small archive ~67) — no filter
+    "Scams", "scambait",     # huge global subs — India + scam filter
+    "india", "personalfinanceindia", "legaladviceindia",  # Indian general — scam filter
+    "IndiaInvestments", "bangalore", "mumbai",             # Indian general — scam filter
+]
 
 # Seconds between vision calls. gpt-4o-mini TPM=200K; screenshots are token-heavy,
 # so pace ~1 call/1.2s. Anthropic Haiku has higher limits — speed up if using it.
@@ -69,9 +74,15 @@ if not DRY_RUN and (not SUPABASE_URL or not SUPABASE_KEY):
 ARCTIC = "https://arctic-shift.photon-reddit.com/api/posts/search"
 PAGE = 100  # arctic-shift max page size
 
-# Global subs (Scams, scambait) need an India filter — they're not India-specific.
+# Pure scam subs need no filter (every image is a scam report).
+PURE_SUBS = {"indianscammers", "indianscambusters"}
+# Global subs need an India filter — they're not India-specific.
 GLOBAL_SUBS = {"scams", "scambait"}
-INDIA_RE = re.compile(r'(india|indian|\+91|\b91\d{10}\b|₹|rupee|\brs\.?\b|upi|paytm|phonepe|gpay)', re.IGNORECASE)
+INDIA_RE = re.compile(r'(india|indian|\+91|\b91\d{10}\b|₹|rupee|\brs\.?\b|upi|paytm|phonepe|gpay|aadhaar|kyc)', re.IGNORECASE)
+# General Indian subs need a scam filter — only OCR likely-scam image posts.
+SCAM_RE = re.compile(r'(scam|fraud|cheat|cheated|duped|fake|phishing|otp|upi fraud|loan app|'
+                     r'lottery|impersonat|spam|suspicious|scammer|blackmail|sextortion|'
+                     r'fake call|customs|courier|digital arrest|kyc fraud)', re.IGNORECASE)
 
 # ── Arctic-Shift fetch ──────────────────────────────────────────────────────────
 
@@ -132,7 +143,9 @@ def main():
 
     for sub in SUBREDDITS:
         print(f"[r/{sub}]")
-        is_global = sub.lower() in GLOBAL_SUBS
+        low = sub.lower()
+        is_pure = low in PURE_SUBS        # no filter — every image is a scam report
+        is_global = low in GLOBAL_SUBS    # needs India filter
         before: int | None = None
         candidates = 0
         sub_inserted = sub_hits = 0
@@ -153,18 +166,20 @@ def main():
                 if not img:
                     continue
 
-                # India filter for global subs (title+selftext)
-                if is_global:
-                    blob = f"{post.get('title','')} {post.get('selftext','')}"
-                    if not INDIA_RE.search(blob):
-                        continue
+                # Relevance filters (title+selftext)
+                blob = f"{post.get('title','')} {post.get('selftext','')}"
+                if is_global and not (INDIA_RE.search(blob) and SCAM_RE.search(blob)):
+                    continue
+                if not is_pure and not is_global and not SCAM_RE.search(blob):
+                    continue  # general Indian sub → require scam keyword
 
                 candidates += 1
                 if candidates > MAX_POSTS:
                     break
 
                 permalink = "https://reddit.com" + post.get("permalink", "")
-                if not DRY_RUN and already_stored(db, permalink):
+                # Skip only if ALREADY OCR'd — a text-only signal for this post must still be OCR'd.
+                if not DRY_RUN and already_ocrd(db, permalink):
                     g_skipped += 1
                     continue
 

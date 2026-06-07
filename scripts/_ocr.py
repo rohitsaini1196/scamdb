@@ -133,22 +133,32 @@ def _call_openai(b64: str, media_type: str) -> str | None:
 
 
 def ocr_image(url: str) -> dict | None:
-    """OCR an image URL → {phones, upis, is_scam} or None. Regex-validated."""
+    """OCR an image URL → {phones, upis, is_scam} or None. Regex-validated.
+    Retries on 429 (rate limit) with Retry-After backoff so images aren't lost."""
     img = fetch_image_b64(url)
     if not img:
         return None
     b64, media_type = img
 
-    try:
-        text = _call_anthropic(b64, media_type) if VISION_PROVIDER == "anthropic" else _call_openai(b64, media_type)
-    except urllib.error.HTTPError as e:
-        bd = e.read().decode() if hasattr(e, "read") else ""
-        print(f"    vision API {e.code}: {bd[:160]}")
-        if e.code == 429:
-            time.sleep(30)
-        return None
-    except Exception as e:
-        print(f"    vision error: {e}")
+    text = None
+    for attempt in range(4):
+        try:
+            text = _call_anthropic(b64, media_type) if VISION_PROVIDER == "anthropic" else _call_openai(b64, media_type)
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                retry_after = e.headers.get("Retry-After") if hasattr(e, "headers") else None
+                wait = int(retry_after) if (retry_after and retry_after.isdigit()) else min(20 * (attempt + 1), 60)
+                print(f"    429 rate limit — waiting {wait}s (attempt {attempt + 1}/4)")
+                time.sleep(wait)
+                continue
+            bd = e.read().decode() if hasattr(e, "read") else ""
+            print(f"    vision API {e.code}: {bd[:160]}")
+            return None
+        except Exception as e:
+            print(f"    vision error: {e}")
+            return None
+    if text is None:
         return None
 
     if not text:
@@ -173,6 +183,15 @@ def ocr_image(url: str) -> dict | None:
 
 def already_stored(db: Client, source_url: str) -> bool:
     r = db.table("raw_signals").select("id", count="exact", head=True).eq("source_url", source_url).execute()
+    return (r.count or 0) > 0
+
+
+def already_ocrd(db: Client, source_url: str) -> bool:
+    """True only if an OCR'd signal (screenshot_urls populated) already exists for this URL.
+    A text-only signal for the same post does NOT count — we still want to OCR its image."""
+    r = (db.table("raw_signals").select("id", count="exact", head=True)
+         .eq("source_url", source_url).not_.is_("screenshot_urls", "null")
+         .neq("screenshot_urls", "{}").execute())
     return (r.count or 0) > 0
 
 
