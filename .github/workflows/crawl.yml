@@ -15,50 +15,14 @@ on:
         options: ['false', 'true']
 
 jobs:
-  crawl:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: requirements-crawler.txt
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements-crawler.txt
-          crawl4ai-setup
-
-      - name: Install Playwright browsers
-        run: playwright install chromium --with-deps
-
-      - name: Run X / Twitter crawler (API v2)
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
-        run: |
-          # Twitter API v2 — official govt accounts (@CyberDost) + fraud search.
-          # No-ops gracefully if TWITTER_BEARER_TOKEN is unset.
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            python scripts/crawl_twitter.py --dry-run
-          else
-            python scripts/crawl_twitter.py
-          fi
-
-      - name: Trigger signal processor
-        if: github.event.inputs.dry_run != 'true'
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
-          curl -sL -o /dev/null -w "Process signals: %{http_code}\n" \
-            "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
+  # Twitter/X crawler DISABLED. Two reasons:
+  #  1. X API free tier is write-only (402 CreditsDepleted) — read/search needs $175/mo.
+  #  2. @CyberDost is an AWARENESS account, not a scam-report source. Its tweets carry
+  #     helpline/example numbers, and the regex even sliced tweet IDs into fake phone
+  #     numbers — every Twitter-sourced entity was a false positive (cleaned from prod).
+  #  Re-enable only with: paid API tier + a rewrite that excludes awareness accounts
+  #  and never parses numbers from tweet metadata/IDs.
+  # crawl: (disabled — see scripts/crawl_twitter.py)
 
   ingest-reddit:
     runs-on: ubuntu-latest
