@@ -111,7 +111,6 @@ export default async function SearchPage({ searchParams }: Props) {
                   : entity.normalized_value;
                 const level = getLevel(entity.report_count);
                 const lv = LEVEL_SHORT[level];
-                const topCat = entity.report_count > 0 ? null : null; // fetched via reports join - skip for now
 
                 return (
                   <Link
@@ -120,19 +119,11 @@ export default async function SearchPage({ searchParams }: Props) {
                     className="block"
                   >
                     <div
-                      className="flex items-center justify-between gap-4 rounded-[11px] border p-[16px] transition-all cursor-pointer"
+                      className="flex items-center justify-between gap-4 rounded-[11px] border p-[16px] cursor-pointer transition-all hover:border-[var(--line-strong)] hover:shadow-[0_4px_16px_-6px_rgba(20,30,50,.12),0_1px_3px_rgba(20,30,50,.06)]"
                       style={{
                         background: "var(--paper)",
                         borderColor: "var(--line)",
                         boxShadow: "0 1px 2px rgba(20,30,50,.05)",
-                      }}
-                      onMouseOver={e => {
-                        (e.currentTarget as HTMLElement).style.borderColor = "var(--line-strong)";
-                        (e.currentTarget as HTMLElement).style.boxShadow = "0 4px 16px -6px rgba(20,30,50,.12), 0 1px 3px rgba(20,30,50,.06)";
-                      }}
-                      onMouseOut={e => {
-                        (e.currentTarget as HTMLElement).style.borderColor = "var(--line)";
-                        (e.currentTarget as HTMLElement).style.boxShadow = "0 1px 2px rgba(20,30,50,.05)";
                       }}
                     >
                       <div className="min-w-0">
