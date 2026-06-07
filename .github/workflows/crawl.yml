@@ -189,6 +189,51 @@ jobs:
           curl -sL -o /dev/null -w "Process screenshot signals: %{http_code}\n" \
             "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
 
+  # Arctic-Shift archive — the reliable bulk OCR engine. Pure HTTP (no Reddit
+  # auth, no browser, no datacenter blocking). Recent-window on the 6h cron;
+  # the deep historical sweep is a one-time local run.
+  crawl-archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install supabase
+
+      - name: Archive OCR (recent window)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          SINCE=$(date -u -d '21 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-21d +%Y-%m-%d)
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python scripts/crawl_archive.py --dry-run --max=40 --since=$SINCE
+          else
+            python scripts/crawl_archive.py --max=120 --since=$SINCE
+          fi
+
+      - name: Trigger signal processor
+        if: github.event.inputs.dry_run != 'true'
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          sleep 10
+          for i in 1 2 3; do
+            curl -sL -o /dev/null -w "Process archive signals: %{http_code}\n" \
+              "https://www.scamdb.in/api/cron/process?secret=$CRON_SECRET"
+            sleep 5
+          done
+
   # crawl-news removed from cron — 0% yield. News articles describe arrests
   # without listing the actual scammer number. Script kept in scripts/ for manual use.
 
