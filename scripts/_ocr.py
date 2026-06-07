@@ -188,17 +188,25 @@ def ocr_image(url: str) -> dict | None:
 # ── Storage ─────────────────────────────────────────────────────────────────────
 
 def already_stored(db: Client, source_url: str) -> bool:
-    r = db.table("raw_signals").select("id", count="exact", head=True).eq("source_url", source_url).execute()
-    return (r.count or 0) > 0
+    try:
+        r = db.table("raw_signals").select("id", count="exact", head=True).eq("source_url", source_url).execute()
+        return (r.count or 0) > 0
+    except Exception as e:
+        print(f"    already_stored check failed: {e}")
+        return False  # safer to re-process than to crash the run
 
 
 def already_ocrd(db: Client, source_url: str) -> bool:
     """True only if an OCR'd signal (screenshot_urls populated) already exists for this URL.
     A text-only signal for the same post does NOT count — we still want to OCR its image."""
-    r = (db.table("raw_signals").select("id", count="exact", head=True)
-         .eq("source_url", source_url).not_.is_("screenshot_urls", "null")
-         .neq("screenshot_urls", "{}").execute())
-    return (r.count or 0) > 0
+    try:
+        r = (db.table("raw_signals").select("id", count="exact", head=True)
+             .eq("source_url", source_url).not_.is_("screenshot_urls", "null")
+             .neq("screenshot_urls", "{}").execute())
+        return (r.count or 0) > 0
+    except Exception as e:
+        print(f"    already_ocrd check failed: {e}")
+        return False
 
 
 def mark_ocr_attempted(db: Client, permalink: str, image_url: str) -> None:

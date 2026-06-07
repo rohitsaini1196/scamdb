@@ -141,74 +141,97 @@ def main():
     db = None if DRY_RUN else create_client(SUPABASE_URL, SUPABASE_KEY)
     g_inserted = g_skipped = g_ocrd = g_hits = 0
 
-    for sub in SUBREDDITS:
-        print(f"[r/{sub}]")
+    def crawl_sub(sub: str):
+        """Crawl one subreddit. Returns (candidates, hits, inserted). Never raises on a bad post/page."""
+        nonlocal g_inserted, g_skipped, g_ocrd, g_hits
         low = sub.lower()
         is_pure = low in PURE_SUBS        # no filter — every image is a scam report
         is_global = low in GLOBAL_SUBS    # needs India filter
         before: int | None = None
-        candidates = 0
-        sub_inserted = sub_hits = 0
+        candidates = sub_inserted = sub_hits = 0
 
         while candidates < MAX_POSTS:
-            posts = fetch_page(sub, before)
+            try:
+                posts = fetch_page(sub, before)
+            except Exception as e:
+                print(f"  fetch_page error (stopping sub): {e}")
+                break
             if not posts:
                 break
-            before = min(int(p.get("created_utc", 0)) for p in posts) - 1
+
+            # Advance pagination cursor (guard against missing/garbage created_utc)
+            cu = [int(p.get("created_utc", 0)) for p in posts if str(p.get("created_utc", "")).strip().isdigit()]
+            if not cu:
+                break
+            before = min(cu) - 1
 
             for post in posts:
-                created = int(post.get("created_utc", 0))
-                if SINCE_EPOCH and created < SINCE_EPOCH:
-                    candidates = MAX_POSTS  # past the window; stop this sub
-                    break
+                try:
+                    created = int(post.get("created_utc", 0)) if str(post.get("created_utc", "")).strip().isdigit() else 0
+                    if SINCE_EPOCH and created and created < SINCE_EPOCH:
+                        candidates = MAX_POSTS  # past the window; stop this sub
+                        break
 
-                img = post_image_url(post)
-                if not img:
+                    img = post_image_url(post)
+                    if not img:
+                        continue
+
+                    # Relevance filters (title+selftext)
+                    blob = f"{post.get('title','')} {post.get('selftext','')}"
+                    if is_global and not (INDIA_RE.search(blob) and SCAM_RE.search(blob)):
+                        continue
+                    if not is_pure and not is_global and not SCAM_RE.search(blob):
+                        continue  # general Indian sub → require scam keyword
+
+                    candidates += 1
+                    if candidates > MAX_POSTS:
+                        break
+
+                    permalink = "https://reddit.com" + post.get("permalink", "")
+                    # Skip only if ALREADY OCR'd — a text-only signal for this post must still be OCR'd.
+                    if not DRY_RUN and already_ocrd(db, permalink):
+                        g_skipped += 1
+                        continue
+
+                    ocr = ocr_image(img)
+                    g_ocrd += 1
+                    time.sleep(PACE)  # pace vision calls (avoid TPM 429 on large images)
+                    if not ocr or not ocr["is_scam"]:
+                        # Record the attempt so future cron runs skip this dead image.
+                        if not DRY_RUN:
+                            mark_ocr_attempted(db, permalink, img)
+                        continue
+
+                    g_hits += 1; sub_hits += 1
+                    found = []
+                    if ocr["phones"]: found.append("📞 " + ", ".join(ocr["phones"]))
+                    if ocr["upis"]:   found.append("💳 " + ", ".join(ocr["upis"]))
+                    print(f"  [{candidates}] {post.get('title','')[:45]} → {' | '.join(found)}")
+
+                    if DRY_RUN:
+                        continue
+                    rec = {"title": post.get("title", ""), "selftext": post.get("selftext", ""),
+                           "permalink": permalink, "created_utc": created}
+                    if store_signal(db, rec, ocr, img):
+                        g_inserted += 1; sub_inserted += 1
+                except Exception as e:
+                    # One bad post must never kill the run — log and continue.
+                    print(f"    post error (skipped): {e}")
                     continue
-
-                # Relevance filters (title+selftext)
-                blob = f"{post.get('title','')} {post.get('selftext','')}"
-                if is_global and not (INDIA_RE.search(blob) and SCAM_RE.search(blob)):
-                    continue
-                if not is_pure and not is_global and not SCAM_RE.search(blob):
-                    continue  # general Indian sub → require scam keyword
-
-                candidates += 1
-                if candidates > MAX_POSTS:
-                    break
-
-                permalink = "https://reddit.com" + post.get("permalink", "")
-                # Skip only if ALREADY OCR'd — a text-only signal for this post must still be OCR'd.
-                if not DRY_RUN and already_ocrd(db, permalink):
-                    g_skipped += 1
-                    continue
-
-                ocr = ocr_image(img)
-                g_ocrd += 1
-                time.sleep(PACE)  # pace vision calls (avoid TPM 429 on large images)
-                if not ocr or not ocr["is_scam"]:
-                    # Record the attempt so future cron runs skip this dead image.
-                    if not DRY_RUN:
-                        mark_ocr_attempted(db, permalink, img)
-                    continue
-
-                g_hits += 1; sub_hits += 1
-                found = []
-                if ocr["phones"]: found.append("📞 " + ", ".join(ocr["phones"]))
-                if ocr["upis"]:   found.append("💳 " + ", ".join(ocr["upis"]))
-                print(f"  [{candidates}] {post.get('title','')[:45]} → {' | '.join(found)}")
-
-                if DRY_RUN:
-                    continue
-                rec = {"title": post.get("title", ""), "selftext": post.get("selftext", ""),
-                       "permalink": permalink, "created_utc": created}
-                if store_signal(db, rec, ocr, img):
-                    g_inserted += 1; sub_inserted += 1
 
             if SINCE_EPOCH and before and before < SINCE_EPOCH:
                 break
 
-        print(f"  → {candidates} image posts scanned, {sub_hits} with entities, {sub_inserted} stored\n")
+        return candidates, sub_hits, sub_inserted
+
+    for sub in SUBREDDITS:
+        print(f"[r/{sub}]")
+        try:
+            candidates, sub_hits, sub_inserted = crawl_sub(sub)
+            print(f"  → {candidates} image posts scanned, {sub_hits} with entities, {sub_inserted} stored\n")
+        except Exception as e:
+            print(f"  [r/{sub}] sub-level error (skipped): {e}\n")
+            continue
 
     print(f"Total: OCR'd {g_ocrd} | entities {g_hits} | stored {g_inserted} | dup {g_skipped}")
     if not DRY_RUN:

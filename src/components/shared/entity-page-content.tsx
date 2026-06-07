@@ -282,9 +282,23 @@ export function EntityPageContent({ type, normalized, displayValue, entity, repo
 
               {/* ── Report rows ── */}
               <div className="py-[18px]">
-                <p className="text-[11px] font-semibold tracking-[0.13em] uppercase mb-1" style={{ color: "var(--ink-3)" }}>
+                <p className="text-[11px] font-semibold tracking-[0.13em] uppercase mb-2" style={{ color: "var(--ink-3)" }}>
                   Community reports ({reportCount})
                 </p>
+
+                {/* AI-review disclaimer */}
+                <div
+                  className="flex items-start gap-2 rounded-[10px] px-3 py-2.5 mb-3 text-[12.5px] leading-[1.5]"
+                  style={{ background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink-2)" }}
+                >
+                  <SparkIcon />
+                  <span>
+                    Some reports are automatically collected from public posts and screened with
+                    AI assistance — <strong style={{ color: "var(--ink)", fontWeight: 600 }}>not individually verified by a human</strong>.
+                    Treat all listings as community signals, not confirmation of fraud.
+                  </span>
+                </div>
+
                 <div>
                   {reports.map((report) => (
                     <ReportRow key={report.id} report={report} />
@@ -392,6 +406,16 @@ function ReportRow({ report }: { report: Report }) {
             sourceUrl={report.source_url}
           />
         )}
+        {report.source_type && report.source_type !== "manual" && (
+          <span
+            className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full"
+            style={{ background: "var(--navy-50)", color: "var(--navy)", border: "1px solid var(--navy-100)" }}
+            title="Collected from a public post and screened with AI assistance, not human-verified"
+          >
+            <SparkIcon size={11} />
+            AI-reviewed
+          </span>
+        )}
         {report.amount_lost && report.amount_lost > 0 && (
           <span className="text-[12.5px] flex items-baseline gap-[5px]" style={{ color: "var(--ink-2)" }}>
             Reported loss{" "}
@@ -425,4 +449,7 @@ function CheckIcon() {
 }
 function FlagIcon() {
   return <svg viewBox="0 0 24 24" fill="none" width={15} height={15}><path d="M5 21V4m0 1h11l-2 4 2 4H5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+function SparkIcon({ size = 14 }: { size?: number }) {
+  return <svg viewBox="0 0 24 24" fill="none" width={size} height={size} style={{ flexShrink: 0, marginTop: size > 12 ? 1 : 0 }}><path d="M12 3l1.8 4.9L18.7 9.7 13.8 11.5 12 16.4 10.2 11.5 5.3 9.7 10.2 7.9 12 3Z" fill="currentColor" opacity="0.85"/><path d="M18 14l.9 2.4L21.3 17.3 18.9 18.2 18 20.6 17.1 18.2 14.7 17.3 17.1 16.4 18 14Z" fill="currentColor" opacity="0.55"/></svg>;
 }
