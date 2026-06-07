@@ -195,6 +195,27 @@ def already_ocrd(db: Client, source_url: str) -> bool:
     return (r.count or 0) > 0
 
 
+def mark_ocr_attempted(db: Client, permalink: str, image_url: str) -> None:
+    """Record an OCR'd-but-no-entity image so cron runs don't re-OCR it forever.
+    Stored as a skipped signal with screenshot_urls set → already_ocrd() skips it next run."""
+    try:
+        db.table("raw_signals").insert({
+            "source_type": "reddit",
+            "source_url": permalink,
+            "title": None,
+            "content": "[screenshot OCR — no entity]",
+            "author": None,
+            "author_score": 0,
+            "screenshot_urls": [image_url],
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "status": "skipped",
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+            "error": "ocr_no_entities",
+        }).execute()
+    except Exception:
+        pass
+
+
 def store_signal(db: Client, post: dict, ocr: dict, image_url: str) -> bool:
     """Insert a raw_signal. Embeds extracted IDs in content so /api/cron/process re-extracts them."""
     ids = " ".join(ocr["phones"] + ocr["upis"])

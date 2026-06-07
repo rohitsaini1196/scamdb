@@ -34,7 +34,7 @@ from supabase import create_client, Client
 
 from _ocr import (
     VISION_PROVIDER, ANTHROPIC_MODEL, OPENAI_MODEL, UA, IMG_HOSTS,
-    preview_to_fullres, ocr_image, already_ocrd, store_signal,
+    preview_to_fullres, ocr_image, already_ocrd, store_signal, mark_ocr_attempted,
 )
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -187,6 +187,9 @@ def main():
                 g_ocrd += 1
                 time.sleep(PACE)  # pace vision calls (avoid TPM 429 on large images)
                 if not ocr or not ocr["is_scam"]:
+                    # Record the attempt so future cron runs skip this dead image.
+                    if not DRY_RUN:
+                        mark_ocr_attempted(db, permalink, img)
                     continue
 
                 g_hits += 1; sub_hits += 1
